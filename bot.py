@@ -67,7 +67,7 @@ async def on_message(message: discord.Message):
 
     import datetime
 
-    # Replace this with the ID of the channel you want it active in
+    # To be replaced with General Chat ID before date
     APRIL_FOOLS_CHANNEL_ID = 123456789012345678  # ← put your channel ID here
 
     @bot.event
@@ -84,7 +84,7 @@ async def on_message(message: discord.Message):
                 await message.add_reaction(emoji)
             else:
                 # If emoji not found, fallback to a default emoji
-                await message.add_reaction("😂")
+                await message.add_reaction("eggplant")
 
         # --- your other anti-spam / embed logic here ---
         await bot.process_commands(message)  # keep command handling working
