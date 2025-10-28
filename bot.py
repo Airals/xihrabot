@@ -65,6 +65,30 @@ async def on_message(message: discord.Message):
         if joined_recently:
             await handle_spammer(message.author, message.guild)
 
+    import datetime
+
+    # Replace this with the ID of the channel you want it active in
+    APRIL_FOOLS_CHANNEL_ID = 123456789012345678  # ← put your channel ID here
+
+    @bot.event
+    async def on_message(message: discord.Message):
+        if message.author.bot:
+            return
+
+        # --- 🐸 April Fools auto-react ---
+        today = datetime.datetime.utcnow().date()
+        if today.month == 4 and today.day == 1 and message.channel.id == APRIL_FOOLS_CHANNEL_ID:
+            # Get the custom emoji
+            emoji = discord.utils.get(message.guild.emojis, name="YoshiWhat")
+            if emoji:
+                await message.add_reaction(emoji)
+            else:
+                # If emoji not found, fallback to a default emoji
+                await message.add_reaction("😂")
+
+        # --- your other anti-spam / embed logic here ---
+        await bot.process_commands(message)  # keep command handling working
+
 
 async def handle_spammer(member: discord.Member, guild: discord.Guild):
     # Delete recent messages from the spammer
