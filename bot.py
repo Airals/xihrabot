@@ -70,7 +70,7 @@ async def handle_spammer(member: discord.Member, guild: discord.Guild):
     # Delete recent messages from the spammer
     for channel in guild.text_channels:
         try:
-            async for msg in channel.history(limit=100):
+            async for msg in channel.history(limit=200):
                 if msg.author == member:
                     await msg.delete()
         except discord.Forbidden:
