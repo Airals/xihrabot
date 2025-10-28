@@ -4,6 +4,14 @@ from datetime import timedelta
 import os
 from dotenv import load_dotenv
 
+# Define intents BEFORE creating the bot
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True  # needed to detect joins
+
+# Now create the bot
+bot = commands.Bot(command_prefix="!", intents=intents)
+
 # Load token from .env file
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
