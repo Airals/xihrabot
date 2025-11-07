@@ -10,7 +10,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True  # needed to detect joins
 
-# Now create the bot
+# Create the bot
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Load token from .env file
@@ -68,6 +68,23 @@ async def on_message(message: discord.Message):
         joined_recently = (discord.utils.utcnow() - message.author.joined_at).total_seconds() < 3600
         if joined_recently:
             await handle_spammer(message.author, message.guild)
+
+    # --- 3️⃣ New User Watch System ---
+    joined_recently = (discord.utils.utcnow() - message.author.joined_at).total_seconds() < 600  # 10 minutes
+    if joined_recently and ("http" in message.content.lower() or "commission" in message.content.lower()):
+        log_channel = discord.utils.get(message.guild.text_channels, name="logs")
+        if log_channel:
+            await log_channel.send(
+                f"⚠️ **Suspicious message from new user {message.author.mention}:**\n> {message.content}"
+            )
+
+        # Optionally delete the message
+        try:
+            await message.delete()
+        except discord.Forbidden:
+            pass
+        except discord.HTTPException:
+            pass
 
 
 async def handle_spammer(member: discord.Member, guild: discord.Guild):
