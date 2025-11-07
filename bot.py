@@ -37,16 +37,22 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # --- 1️⃣ Remove embeds if message has more than one ---
-    if len(message.embeds) > 1:
-        try:
-            await message.edit(suppress=True)
-            await message.channel.send(
-                f"{message.author.mention}, multiple embeds aren't allowed. They’ve been removed.",
-                delete_after=5
-            )
-        except discord.Forbidden:
+    # --- 1️⃣ Remove embeds if message has more than four ---
+    if len(message.embeds) >= 5:
+        import re
+        link_count = len(re.findall(r'https?://\S+', message.content))
+
+        if link_count >= 3:
+            try:
+                await message.edit(suppress=True)
+                await message.channel.send(
+                    f"{message.author.mention}, multiple embeds aren't allowed. They’ve been removed.",
+                    delete_after=5
+                )
+            except discord.Forbidden:
             print("Bot lacks permissions to edit/suppress embeds.")
+            except discord.HTTPException:
+            print("Failed to suppress embeds due to a network or Discord error.")
 
     # --- 2️⃣ Detect spam from new users ---
     now = message.created_at.timestamp()
