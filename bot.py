@@ -3,6 +3,7 @@ from discord.ext import commands
 from datetime import timedelta
 import os
 from dotenv import load_dotenv
+import re
 
 # Define intents BEFORE creating the bot
 intents = discord.Intents.default()
@@ -15,11 +16,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Load token from .env file
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- CONFIG ---
 SPAM_MESSAGE_THRESHOLD = 5  # messages in X seconds
-SPAM_TIME_WINDOW = 5  # seconds
+SPAM_TIME_WINDOW = 5        # seconds
 MUTE_DURATION = timedelta(hours=24)
 
 # Store recent messages to detect spam
@@ -37,22 +37,21 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # --- 1️⃣ Remove embeds if message has more than four ---
+    # --- 1️⃣ Remove embeds if message has 5+ embeds AND 3+ links ---
     if len(message.embeds) >= 5:
-        import re
         link_count = len(re.findall(r'https?://\S+', message.content))
 
         if link_count >= 3:
             try:
                 await message.edit(suppress=True)
                 await message.channel.send(
-                    f"{message.author.mention}, multiple embeds aren't allowed. They’ve been removed.",
+                    f"{message.author.mention}, messages with 5+ embeds and 3+ links aren't allowed. They’ve been removed.",
                     delete_after=5
                 )
             except discord.Forbidden:
-            print("Bot lacks permissions to edit/suppress embeds.")
+                print("Bot lacks permissions to edit/suppress embeds.")
             except discord.HTTPException:
-            print("Failed to suppress embeds due to a network or Discord error.")
+                print("Failed to suppress embeds due to a network or Discord error.")
 
     # --- 2️⃣ Detect spam from new users ---
     now = message.created_at.timestamp()
@@ -66,7 +65,6 @@ async def on_message(message: discord.Message):
 
     # Check if user is spamming
     if len(recent_messages[user_id]) >= SPAM_MESSAGE_THRESHOLD:
-        # Optionally check if user joined recently
         joined_recently = (discord.utils.utcnow() - message.author.joined_at).total_seconds() < 3600
         if joined_recently:
             await handle_spammer(message.author, message.guild)
