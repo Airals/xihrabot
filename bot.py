@@ -37,15 +37,15 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # --- 1️⃣ Remove embeds if message has 5+ embeds AND 3+ links ---
-    if len(message.embeds) >= 5:
+    # --- 1️⃣ Remove embeds if message has 2+ embeds AND 2+ links ---
+    if len(message.embeds) >= 2:
         link_count = len(re.findall(r'https?://\S+', message.content))
 
-        if link_count >= 3:
+        if link_count >= 2:
             try:
                 await message.edit(suppress=True)
                 await message.channel.send(
-                    f"{message.author.mention}, messages with 5+ embeds and 3+ links aren't allowed. They’ve been removed.",
+                    f"{message.author.mention}, messages with 2+ embeds aren't allowed. They’ve been removed. Please wrap your links with < > to avoid this",
                     delete_after=5
                 )
             except discord.Forbidden:
