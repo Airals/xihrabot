@@ -10,7 +10,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True  # needed to detect joins
 
-# Now create the bot
+# Create the bot
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Load token from .env file
@@ -37,15 +37,15 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # --- 1️⃣ Remove embeds if message has 5+ embeds AND 3+ links ---
-    if len(message.embeds) >= 5:
+    # --- 1️⃣ Remove embeds if message has 2+ embeds AND 2+ links ---
+    if len(message.embeds) >= 2:
         link_count = len(re.findall(r'https?://\S+', message.content))
 
-        if link_count >= 3:
+        if link_count >= 2:
             try:
                 await message.edit(suppress=True)
                 await message.channel.send(
-                    f"{message.author.mention}, messages with 5+ embeds and 3+ links aren't allowed. They’ve been removed.",
+                    f"{message.author.mention}, messages with 2+ embeds aren't allowed. They’ve been removed. Please wrap your links with < > to avoid this",
                     delete_after=5
                 )
             except discord.Forbidden:
@@ -68,6 +68,23 @@ async def on_message(message: discord.Message):
         joined_recently = (discord.utils.utcnow() - message.author.joined_at).total_seconds() < 3600
         if joined_recently:
             await handle_spammer(message.author, message.guild)
+
+    # --- 3️⃣ New User Watch System ---
+    joined_recently = (discord.utils.utcnow() - message.author.joined_at).total_seconds() < 600  # 10 minutes
+    if joined_recently and ("http" in message.content.lower() or "commission" in message.content.lower()):
+        log_channel = discord.utils.get(message.guild.text_channels, name="logs")
+        if log_channel:
+            await log_channel.send(
+                f"⚠️ **Suspicious message from new user {message.author.mention}:**\n> {message.content}"
+            )
+
+        # Optionally delete the message
+        try:
+            await message.delete()
+        except discord.Forbidden:
+            pass
+        except discord.HTTPException:
+            pass
 
 
 async def handle_spammer(member: discord.Member, guild: discord.Guild):
