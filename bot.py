@@ -15,7 +15,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ---------- ENV ----------
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))  # optional but recommended
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))  # Grabs log channel ID
 
 # ---------- CONFIG ----------
 SPAM_MESSAGE_THRESHOLD = 5   # messages
