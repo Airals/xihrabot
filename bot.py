@@ -16,6 +16,25 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))  # Grabs log channel ID
+SOURCE_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("SOURCE_ANNOUNCEMENT_CHANNEL_ID", 0))
+TARGET_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("TARGET_ANNOUNCEMENT_CHANNEL_ID", 0))
+
+RAW_BLACKLIST = os.getenv("ANNOUNCEMENT_BLACKLIST", "")
+ANNOUNCEMENT_BLACKLIST = {
+    word.strip().lower()
+    for word in RAW_BLACKLIST.split(",")
+    if word.strip()
+}
+
+
+def contains_blacklisted_keyword(content: str) -> bool:
+    content = content.lower()
+
+    for word in ANNOUNCEMENT_BLACKLIST:
+        if re.search(rf"\b{re.escape(word)}\b", content):
+            return True
+
+    return False
 
 # ---------- CONFIG ----------
 SPAM_MESSAGE_THRESHOLD = 5   # messages
@@ -144,6 +163,41 @@ async def handle_spammer(message: discord.Message):
         print(f"🔇 Muted {member} for 24 hours.")
     except discord.Forbidden:
         print("❌ Missing permission to timeout members.")
+
+# ---------- ANNOUNCEMENT RELAY ----------
+if (
+    SOURCE_ANNOUNCEMENT_CHANNEL_ID
+    and TARGET_ANNOUNCEMENT_CHANNEL_ID
+    and message.channel.id == SOURCE_ANNOUNCEMENT_CHANNEL_ID
+):
+    content = message.content or ""
+
+    # 🚫 Blacklist check
+    if ANNOUNCEMENT_BLACKLIST and contains_blacklisted_keyword(content):
+        print("⛔ Announcement blocked due to blacklist keyword.")
+        return
+
+    target_channel = bot.get_channel(TARGET_ANNOUNCEMENT_CHANNEL_ID)
+
+    if target_channel:
+        try:
+            files = [await a.to_file() for a in message.attachments]
+
+            sent_message = await target_channel.send(
+                content=content,
+                files=files,
+                allowed_mentions=discord.AllowedMentions.none()
+            )
+
+            # 📣 Auto-publish if target is an Announcement channel
+            if isinstance(target_channel, discord.TextChannel) and target_channel.is_news():
+                try:
+                    await sent_message.publish()
+                except discord.Forbidden:
+                    print("❌ Missing permission to publish announcement.")
+
+        except discord.HTTPException:
+            print("❌ Failed to relay announcement.")
 
 
 # ---------- RUN ----------
