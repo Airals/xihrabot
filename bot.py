@@ -5,27 +5,28 @@ import os
 from dotenv import load_dotenv
 import re
 
-# Define intents BEFORE creating the bot
+# ---------- INTENTS ----------
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True  # needed to detect joins
+intents.members = True
 
-# Create the bot
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Load token from .env file
+# ---------- ENV ----------
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))  # optional but recommended
 
-# --- CONFIG ---
-SPAM_MESSAGE_THRESHOLD = 5  # messages in X seconds
-SPAM_TIME_WINDOW = 5        # seconds
+# ---------- CONFIG ----------
+SPAM_MESSAGE_THRESHOLD = 5   # messages
+SPAM_TIME_WINDOW = 5         # seconds
 MUTE_DURATION = timedelta(hours=24)
 
-# Store recent messages to detect spam
-recent_messages = {}
+# ---------- STATE ----------
+recent_messages: dict[int, list[float]] = {}
+handled_spammers: set[int] = set()
 
-
+# ---------- EVENTS ----------
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
@@ -33,11 +34,15 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
-    # Ignore bot messages
-    if message.author.bot:
+    if message.author.bot or not message.guild:
         return
 
-    # --- 1️⃣ Remove embeds if message has 2+ embeds AND 2+ links ---
+    # Staff bypass
+    if message.author.guild_permissions.manage_messages:
+        await bot.process_commands(message)
+        return
+
+    # ---------- 1️⃣ EMBED + LINK CONTROL ----------
     if len(message.embeds) >= 2:
         link_count = len(re.findall(r'https?://\S+', message.content))
 
@@ -45,66 +50,101 @@ async def on_message(message: discord.Message):
             try:
                 await message.edit(suppress=True)
                 await message.channel.send(
-                    f"{message.author.mention}, messages with 2+ embeds aren't allowed. They’ve been removed. Please wrap your links with < > to avoid this",
+                    f"{message.author.mention}, messages with **2+ embeds** aren’t allowed.\n"
+                    "Please wrap links in `< >` to prevent embeds.",
                     delete_after=5
                 )
             except discord.Forbidden:
-                print("Bot lacks permissions to edit/suppress embeds.")
+                print("❌ Missing permissions to suppress embeds.")
             except discord.HTTPException:
-                print("Failed to suppress embeds due to a network or Discord error.")
+                print("❌ Failed to suppress embeds.")
 
-    # --- 2️⃣ Detect spam from new users ---
+    # ---------- SAFETY: joined_at can be None ----------
+    if not message.author.joined_at:
+        await bot.process_commands(message)
+        return
+
     now = message.created_at.timestamp()
     user_id = message.author.id
+
+    # ---------- 2️⃣ SPAM DETECTION ----------
     recent_messages.setdefault(user_id, []).append(now)
 
     # Keep only recent messages
     recent_messages[user_id] = [
-        t for t in recent_messages[user_id] if now - t <= SPAM_TIME_WINDOW
+        t for t in recent_messages[user_id]
+        if now - t <= SPAM_TIME_WINDOW
     ]
 
-    # Check if user is spamming
-    if len(recent_messages[user_id]) >= SPAM_MESSAGE_THRESHOLD:
-        joined_recently = (discord.utils.utcnow() - message.author.joined_at).total_seconds() < 3600
-        if joined_recently:
-            await handle_spammer(message.author, message.guild)
+    joined_recently_1h = (
+        discord.utils.utcnow() - message.author.joined_at
+    ).total_seconds() < 3600
 
-    # --- 3️⃣ New User Watch System ---
-    joined_recently = (discord.utils.utcnow() - message.author.joined_at).total_seconds() < 600  # 10 minutes
-    if joined_recently and ("http" in message.content.lower() or "commission" in message.content.lower()):
-        log_channel = discord.utils.get(message.guild.text_channels, name="logs")
+    if (
+        joined_recently_1h
+        and len(recent_messages[user_id]) >= SPAM_MESSAGE_THRESHOLD
+        and user_id not in handled_spammers
+    ):
+        handled_spammers.add(user_id)
+        await handle_spammer(message)
+        recent_messages.pop(user_id, None)
+
+    # ---------- 3️⃣ NEW USER WATCH ----------
+    joined_recently_10m = (
+        discord.utils.utcnow() - message.author.joined_at
+    ).total_seconds() < 600
+
+    suspicious = any(
+        word in message.content.lower()
+        for word in ("http", "commission")
+    )
+
+    if joined_recently_10m and suspicious:
+        log_channel = (
+            message.guild.get_channel(LOG_CHANNEL_ID)
+            if LOG_CHANNEL_ID
+            else discord.utils.get(message.guild.text_channels, name="logs")
+        )
+
         if log_channel:
             await log_channel.send(
-                f"⚠️ **Suspicious message from new user {message.author.mention}:**\n> {message.content}"
+                f"⚠️ **Suspicious message from new user** {message.author.mention}\n"
+                f"Channel: {message.channel.mention}\n"
+                f"> {message.content}"
             )
 
-        # Optionally delete the message
         try:
             await message.delete()
-        except discord.Forbidden:
-            pass
-        except discord.HTTPException:
+        except (discord.Forbidden, discord.HTTPException):
             pass
 
+    # REQUIRED so commands still work
+    await bot.process_commands(message)
 
-async def handle_spammer(member: discord.Member, guild: discord.Guild):
-    # Delete recent messages from the spammer
-    for channel in guild.text_channels:
-        try:
-            async for msg in channel.history(limit=200):
-                if msg.author == member:
-                    await msg.delete()
-        except discord.Forbidden:
-            pass
-        except discord.HTTPException:
-            pass
 
-    # Mute the member (requires “Muted” role or Timeout feature)
+# ---------- SPAM HANDLER ----------
+async def handle_spammer(message: discord.Message):
+    member = message.author
+    guild = message.guild
+
+    # Delete recent messages ONLY in current channel
     try:
-        await member.edit(timed_out_until=discord.utils.utcnow() + MUTE_DURATION)
-        print(f"Muted {member} for 24 hours due to spam.")
+        async for msg in message.channel.history(limit=20):
+            if msg.author == member:
+                await msg.delete()
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+
+    # Timeout (Discord native mute)
+    try:
+        await member.edit(
+            timed_out_until=discord.utils.utcnow() + MUTE_DURATION,
+            reason="Automated spam detection"
+        )
+        print(f"🔇 Muted {member} for 24 hours.")
     except discord.Forbidden:
-        print("Bot lacks permission to timeout members.")
+        print("❌ Missing permission to timeout members.")
 
 
+# ---------- RUN ----------
 bot.run(TOKEN)
