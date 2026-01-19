@@ -184,4 +184,10 @@ async def handle_spammer(message: discord.Message):
         pass
 
     try:
-        await mem
+        await member.edit(
+            timed_out_until=discord.utils.utcnow() + MUTE_DURATION,
+            reason="Automated spam detection"
+        )
+        print(f"🔇 Muted {member} for 24 hours.")
+    except discord.Forbidden:
+        print("❌ Missing permission to timeout members.")
