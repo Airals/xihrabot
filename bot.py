@@ -15,7 +15,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ---------- ENV ----------
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))  # Grabs log channel ID
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))
 SOURCE_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("SOURCE_ANNOUNCEMENT_CHANNEL_ID", 0))
 TARGET_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("TARGET_ANNOUNCEMENT_CHANNEL_ID", 0))
 
@@ -29,16 +29,15 @@ ANNOUNCEMENT_BLACKLIST = {
 
 def contains_blacklisted_keyword(content: str) -> bool:
     content = content.lower()
-
     for word in ANNOUNCEMENT_BLACKLIST:
         if re.search(rf"\b{re.escape(word)}\b", content):
             return True
-
     return False
 
+
 # ---------- CONFIG ----------
-SPAM_MESSAGE_THRESHOLD = 5   # messages
-SPAM_TIME_WINDOW = 5         # seconds
+SPAM_MESSAGE_THRESHOLD = 5
+SPAM_TIME_WINDOW = 5
 MUTE_DURATION = timedelta(hours=24)
 
 # ---------- STATE ----------
@@ -53,7 +52,7 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
-    if message.author.bot or not message.guild:
+    if not message.guild:
         return
 
     # ---------- ANNOUNCEMENT RELAY ----------
@@ -64,7 +63,6 @@ async def on_message(message: discord.Message):
     ):
         content = message.content or ""
 
-        # 🚫 Blacklist check
         if ANNOUNCEMENT_BLACKLIST and contains_blacklisted_keyword(content):
             print("⛔ Announcement blocked due to blacklist keyword.")
         else:
@@ -80,24 +78,26 @@ async def on_message(message: discord.Message):
                         allowed_mentions=discord.AllowedMentions.none()
                     )
 
-                    # 📣 Auto-publish if target is an Announcement channel
                     if isinstance(target_channel, discord.TextChannel) and target_channel.is_news():
                         try:
                             await sent_message.publish()
                         except discord.Forbidden:
                             print("❌ Missing permission to publish announcement.")
-
                 except discord.HTTPException:
                     print("❌ Failed to relay announcement.")
+
+    # 🚫 Ignore bots AFTER announcement relay
+    if message.author.bot:
+        return
 
     # Staff bypass
     if message.author.guild_permissions.manage_messages:
         await bot.process_commands(message)
         return
 
-    # ---------- 1️⃣ EMBED + LINK CONTROL ----------
+    # ---------- EMBED + LINK CONTROL ----------
     if len(message.embeds) >= 2:
-        link_count = len(re.findall(r'https?://\S+', message.content))
+        link_count = len(re.findall(r"https?://\S+", message.content))
 
         if link_count >= 2:
             try:
@@ -120,10 +120,8 @@ async def on_message(message: discord.Message):
     now = message.created_at.timestamp()
     user_id = message.author.id
 
-    # ---------- 2️⃣ SPAM DETECTION ----------
+    # ---------- SPAM DETECTION ----------
     recent_messages.setdefault(user_id, []).append(now)
-
-    # Keep only recent messages
     recent_messages[user_id] = [
         t for t in recent_messages[user_id]
         if now - t <= SPAM_TIME_WINDOW
@@ -142,7 +140,7 @@ async def on_message(message: discord.Message):
         await handle_spammer(message)
         recent_messages.pop(user_id, None)
 
-    # ---------- 3️⃣ NEW USER WATCH ----------
+    # ---------- NEW USER WATCH ----------
     joined_recently_10m = (
         discord.utils.utcnow() - message.author.joined_at
     ).total_seconds() < 600
@@ -171,16 +169,13 @@ async def on_message(message: discord.Message):
         except (discord.Forbidden, discord.HTTPException):
             pass
 
-    # REQUIRED so commands still work
     await bot.process_commands(message)
 
 
 # ---------- SPAM HANDLER ----------
 async def handle_spammer(message: discord.Message):
     member = message.author
-    guild = message.guild
 
-    # Delete recent messages ONLY in current channel
     try:
         async for msg in message.channel.history(limit=20):
             if msg.author == member:
@@ -188,16 +183,5 @@ async def handle_spammer(message: discord.Message):
     except (discord.Forbidden, discord.HTTPException):
         pass
 
-    # Timeout (Discord native mute)
     try:
-        await member.edit(
-            timed_out_until=discord.utils.utcnow() + MUTE_DURATION,
-            reason="Automated spam detection"
-        )
-        print(f"🔇 Muted {member} for 24 hours.")
-    except discord.Forbidden:
-        print("❌ Missing permission to timeout members.")
-
-
-# ---------- RUN ----------
-bot.run(TOKEN)
+        await mem
