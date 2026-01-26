@@ -73,7 +73,8 @@ async def on_message(message: discord.Message):
                     files = [await a.to_file() for a in message.attachments]
 
                     sent_message = await target_channel.send(
-                        content=content,
+                        content=content if content else None,
+                        embeds=message.embeds if message.embeds else None,
                         files=files,
                         allowed_mentions=discord.AllowedMentions.none()
                     )
