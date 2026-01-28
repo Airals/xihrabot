@@ -2,46 +2,52 @@ import discord
 from discord.ext import commands, tasks
 import os
 import json
+from dotenv import load_dotenv
 
+# ---------- ENV ----------
+load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-SOURCE_CHANNEL_ID = 123456789012345678
-TARGET_CHANNEL_ID = 987654321098765432
+SOURCE_CHANNEL_ID = int(os.getenv("SOURCE_ANNOUNCEMENT_CHANNEL_ID", 0))
+TARGET_CHANNEL_ID = int(os.getenv("TARGET_ANNOUNCEMENT_CHANNEL_ID", 0))
 
 STATE_FILE = "last_message.json"
 
+# ---------- INTENTS ----------
 intents = discord.Intents.default()
-intents.guilds = True
+intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-
-def load_last_message_id():
-    if not os.path.exists(STATE_FILE):
-        return None
-    with open(STATE_FILE, "r") as f:
-        return json.load(f).get("last_id")
+# ---------- STATE ----------
+last_message_id = None
 
 
-def save_last_message_id(message_id: int):
+def load_state():
+    global last_message_id
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "r") as f:
+            data = json.load(f)
+            last_message_id = data.get("last_message_id")
+
+
+def save_state(message_id: int):
     with open(STATE_FILE, "w") as f:
-        json.dump({"last_id": message_id}, f)
+        json.dump({"last_message_id": message_id}, f)
 
 
-last_seen_message_id = None
-
-
+# ---------- EVENTS ----------
 @bot.event
 async def on_ready():
-    global last_seen_message_id
-    last_seen_message_id = load_last_message_id()
-    print(f"Logged in as {bot.user}")
-    poll_source_channel.start()
+    print(f"✅ Logged in as {bot.user}")
+    load_state()
+    poll_announcements.start()
 
 
+# ---------- POLLER ----------
 @tasks.loop(seconds=20)
-async def poll_source_channel():
-    global last_seen_message_id
+async def poll_announcements():
+    global last_message_id
 
     source = bot.get_channel(SOURCE_CHANNEL_ID)
     target = bot.get_channel(TARGET_CHANNEL_ID)
@@ -49,17 +55,37 @@ async def poll_source_channel():
     if not source or not target:
         return
 
-    async for message in source.history(limit=15, oldest_first=True):
-        if last_seen_message_id and message.id <= last_seen_message_id:
+    messages = []
+
+    async for msg in source.history(limit=25, oldest_first=True):
+        if last_message_id and msg.id <= last_message_id:
             continue
+        messages.append(msg)
 
-        # Only forward plain text messages
-        if not message.content:
-            continue
+    for msg in messages:
+        files = [await a.to_file() for a in msg.attachments]
 
-        await target.send(message.content)
-        last_seen_message_id = message.id
-        save_last_message_id(message.id)
+        await target.send(
+            content=msg.content or None,
+            files=files,
+            allowed_mentions=discord.AllowedMentions.none()
+        )
+
+        last_message_id = msg.id
+        save_state(msg.id)
+
+        print(f"📣 Relayed message {msg.id}")
 
 
+# ---------- MODERATION (unchanged) ----------
+@bot.event
+async def on_message(message: discord.Message):
+    if not message.guild:
+        return
+
+    # moderation logic lives here ONLY
+    await bot.process_commands(message)
+
+
+# ---------- RUN ----------
 bot.run(TOKEN)
