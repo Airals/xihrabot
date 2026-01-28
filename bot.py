@@ -1,62 +1,47 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import os
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-SOURCE_CHANNEL_ID = 123456789012345678  # channel the scheduler posts in
-TARGET_CHANNEL_ID = 987654321098765432  # channel to relay to
+SOURCE_CHANNEL_ID = 123456789012345678
+TARGET_CHANNEL_ID = 987654321098765432
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+last_seen_message_id = None
 
 
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
+    poll_source_channel.start()
 
 
-async def relay_message(message: discord.Message):
-    # Ignore bots except the scheduler
-    if message.channel.id != SOURCE_CHANNEL_ID:
+@tasks.loop(seconds=30)
+async def poll_source_channel():
+    global last_seen_message_id
+
+    source = bot.get_channel(SOURCE_CHANNEL_ID)
+    target = bot.get_channel(TARGET_CHANNEL_ID)
+
+    if not source or not target:
         return
 
-    if not message.content:
-        return
+    async for message in source.history(limit=10, oldest_first=True):
+        if last_seen_message_id and message.id <= last_seen_message_id:
+            continue
 
-    target_channel = bot.get_channel(TARGET_CHANNEL_ID)
-    if not target_channel:
-        return
+        # Plain text only
+        if not message.content:
+            continue
 
-    await target_channel.send(message.content)
-
-
-@bot.event
-async def on_message(message: discord.Message):
-    # Normal messages (humans, normal bots)
-    await relay_message(message)
-
-    await bot.process_commands(message)
-
-
-@bot.event
-async def on_raw_message_create(payload):
-    # Catches scheduler / app / system messages
-    if payload.channel_id != SOURCE_CHANNEL_ID:
-        return
-
-    channel = bot.get_channel(payload.channel_id)
-    if not channel:
-        return
-
-    try:
-        message = await channel.fetch_message(payload.message_id)
-    except discord.NotFound:
-        return
-
-    await relay_message(message)
+        await target.send(message.content)
+        last_seen_message_id = message.id
 
 
 bot.run(TOKEN)
