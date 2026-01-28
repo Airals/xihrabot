@@ -4,6 +4,7 @@ from datetime import timedelta
 import os
 from dotenv import load_dotenv
 import re
+import asyncio
 
 # ---------- INTENTS ----------
 intents = discord.Intents.default()
@@ -26,7 +27,6 @@ ANNOUNCEMENT_BLACKLIST = {
     if word.strip()
 }
 
-
 def contains_blacklisted_keyword(content: str) -> bool:
     content = content.lower()
     for word in ANNOUNCEMENT_BLACKLIST:
@@ -43,6 +43,50 @@ MUTE_DURATION = timedelta(hours=24)
 # ---------- STATE ----------
 recent_messages: dict[int, list[float]] = {}
 handled_spammers: set[int] = set()
+relayed_messages: set[int] = set()  # prevents duplicates
+
+
+# ---------- ANNOUNCEMENT RELAY ----------
+async def relay_announcement(message: discord.Message):
+    if not message.guild:
+        return
+
+    if message.id in relayed_messages:
+        return
+
+    if not (
+        SOURCE_ANNOUNCEMENT_CHANNEL_ID
+        and TARGET_ANNOUNCEMENT_CHANNEL_ID
+        and message.channel.id == SOURCE_ANNOUNCEMENT_CHANNEL_ID
+    ):
+        return
+
+    content = message.content or ""
+    if not content:
+        return
+
+    if ANNOUNCEMENT_BLACKLIST and contains_blacklisted_keyword(content):
+        print("⛔ Announcement blocked due to blacklist keyword.")
+        return
+
+    target_channel = message.guild.get_channel(TARGET_ANNOUNCEMENT_CHANNEL_ID)
+    if not target_channel:
+        return
+
+    try:
+        sent_message = await target_channel.send(
+            content=content,
+            allowed_mentions=discord.AllowedMentions.none()
+        )
+
+        if isinstance(target_channel, discord.TextChannel) and target_channel.is_news():
+            await sent_message.publish()
+
+        relayed_messages.add(message.id)
+
+    except discord.HTTPException as e:
+        print(f"❌ Failed to relay announcement: {e}")
+
 
 # ---------- EVENTS ----------
 @bot.event
@@ -50,45 +94,12 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user}")
 
 
+# Normal messages (humans + some bots)
 @bot.event
 async def on_message(message: discord.Message):
-    if not message.guild:
-        return
+    await relay_announcement(message)
 
-    # ---------- ANNOUNCEMENT RELAY ----------
-    if (
-        SOURCE_ANNOUNCEMENT_CHANNEL_ID
-        and TARGET_ANNOUNCEMENT_CHANNEL_ID
-        and message.channel.id == SOURCE_ANNOUNCEMENT_CHANNEL_ID
-    ):
-        content = message.content or ""
-
-        if ANNOUNCEMENT_BLACKLIST and contains_blacklisted_keyword(content):
-            print("⛔ Announcement blocked due to blacklist keyword.")
-        else:
-            target_channel = bot.get_channel(TARGET_ANNOUNCEMENT_CHANNEL_ID)
-
-            if target_channel:
-                try:
-                    files = [await a.to_file() for a in message.attachments]
-
-                    sent_message = await target_channel.send(
-                        content=content if content else None,
-                        embeds=message.embeds if message.embeds else None,
-                        files=files,
-                        allowed_mentions=discord.AllowedMentions.none()
-                    )
-
-                    if isinstance(target_channel, discord.TextChannel) and target_channel.is_news():
-                        try:
-                            await sent_message.publish()
-                        except discord.Forbidden:
-                            print("❌ Missing permission to publish announcement.")
-                except discord.HTTPException:
-                    print("❌ Failed to relay announcement.")
-
-    # 🚫 Ignore bots AFTER announcement relay
-    if message.author.bot:
+    if not message.guild or message.author.bot:
         return
 
     # Staff bypass
@@ -99,7 +110,6 @@ async def on_message(message: discord.Message):
     # ---------- EMBED + LINK CONTROL ----------
     if len(message.embeds) >= 2:
         link_count = len(re.findall(r"https?://\S+", message.content))
-
         if link_count >= 2:
             try:
                 await message.edit(suppress=True)
@@ -108,12 +118,9 @@ async def on_message(message: discord.Message):
                     "Please wrap links in `< >` to prevent embeds.",
                     delete_after=5
                 )
-            except discord.Forbidden:
-                print("❌ Missing permissions to suppress embeds.")
-            except discord.HTTPException:
-                print("❌ Failed to suppress embeds.")
+            except (discord.Forbidden, discord.HTTPException):
+                pass
 
-    # ---------- SAFETY: joined_at can be None ----------
     if not message.author.joined_at:
         await bot.process_commands(message)
         return
@@ -146,18 +153,8 @@ async def on_message(message: discord.Message):
         discord.utils.utcnow() - message.author.joined_at
     ).total_seconds() < 600
 
-    suspicious = any(
-        word in message.content.lower()
-        for word in ("http", "commission")
-    )
-
-    if joined_recently_10m and suspicious:
-        log_channel = (
-            message.guild.get_channel(LOG_CHANNEL_ID)
-            if LOG_CHANNEL_ID
-            else discord.utils.get(message.guild.text_channels, name="logs")
-        )
-
+    if joined_recently_10m and any(w in message.content.lower() for w in ("http", "commission")):
+        log_channel = message.guild.get_channel(LOG_CHANNEL_ID)
         if log_channel:
             await log_channel.send(
                 f"⚠️ **Suspicious message from new user** {message.author.mention}\n"
@@ -171,6 +168,24 @@ async def on_message(message: discord.Message):
             pass
 
     await bot.process_commands(message)
+
+
+# 🔥 RAW EVENT — catches scheduled app messages
+@bot.event
+async def on_raw_message_create(payload: discord.RawMessageCreateEvent):
+    if payload.channel_id != SOURCE_ANNOUNCEMENT_CHANNEL_ID:
+        return
+
+    channel = bot.get_channel(payload.channel_id)
+    if not channel:
+        return
+
+    try:
+        message = await channel.fetch_message(payload.message_id)
+    except discord.NotFound:
+        return
+
+    await relay_announcement(message)
 
 
 # ---------- SPAM HANDLER ----------
@@ -192,3 +207,7 @@ async def handle_spammer(message: discord.Message):
         print(f"🔇 Muted {member} for 24 hours.")
     except discord.Forbidden:
         print("❌ Missing permission to timeout members.")
+
+
+# ---------- RUN ----------
+bot.run(TOKEN)
