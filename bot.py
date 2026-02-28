@@ -166,7 +166,7 @@ async def on_message(message: discord.Message):
             except (discord.Forbidden, discord.HTTPException):
                 pass
 
-            return  # stop further processing
+            return
 
     # ---------- SPAM DETECTION ----------
     now = message.created_at.timestamp()
@@ -192,37 +192,50 @@ async def on_message(message: discord.Message):
         recent_messages.pop(user_id, None)
 
 
+# ---------- RELIABLE OLD EDIT DETECTION ----------
 @bot.event
-async def on_message_edit(before, after):
-    if before.author.bot:
+async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
+    if not payload.guild_id:
         return
 
-    if not before.guild:
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
         return
 
-    if before.content == after.content:
+    channel = guild.get_channel(payload.channel_id)
+    if not channel:
+        return
+
+    try:
+        message = await channel.fetch_message(payload.message_id)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        return
+
+    if message.author.bot:
+        return
+
+    if not message.edited_at:
         return
 
     message_age_seconds = (
-        discord.utils.utcnow() - before.created_at
+        discord.utils.utcnow() - message.created_at
     ).total_seconds()
 
     if message_age_seconds < OLD_EDIT_THRESHOLD:
         return
 
     log_channel = (
-        before.guild.get_channel(LOG_CHANNEL_ID)
+        guild.get_channel(LOG_CHANNEL_ID)
         if LOG_CHANNEL_ID
-        else discord.utils.get(before.guild.text_channels, name="logs")
+        else discord.utils.get(guild.text_channels, name="logs")
     )
 
     if log_channel:
         await log_channel.send(
             f"✏️ **Old message edited (>7 days)**\n"
-            f"User: {before.author.mention}\n"
-            f"Channel: {before.channel.mention}\n\n"
-            f"**Before:**\n> {before.content}\n\n"
-            f"**After:**\n> {after.content}"
+            f"User: {message.author.mention}\n"
+            f"Channel: {channel.mention}\n\n"
+            f"**Current Content:**\n> {message.content or '*No content*'}"
         )
 
 
