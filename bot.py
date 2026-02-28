@@ -32,10 +32,12 @@ SPAM_MESSAGE_THRESHOLD = 5
 SPAM_TIME_WINDOW = 5
 MUTE_DURATION = timedelta(hours=24)
 
+NEW_USER_WATCH_SECONDS = 1_814_400  # 3 weeks
+OLD_EDIT_THRESHOLD = 604800  # 7 days
+
 # ---------- STATE ----------
 recent_messages: dict[int, list[float]] = {}
 handled_spammers: set[int] = set()
-
 
 # ---------- HELPERS ----------
 def contains_blacklisted_keyword(content: str) -> bool:
@@ -55,7 +57,6 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
-    # Ignore DMs
     if not message.guild:
         return
 
@@ -82,7 +83,6 @@ async def on_message(message: discord.Message):
                         allowed_mentions=discord.AllowedMentions.none()
                     )
 
-                    # Auto-publish if announcement channel
                     if isinstance(target_channel, discord.TextChannel) and target_channel.is_news():
                         try:
                             await sent_message.publish()
@@ -94,14 +94,12 @@ async def on_message(message: discord.Message):
                 except discord.HTTPException as e:
                     print(f"❌ Failed to relay announcement: {e}")
 
-    # ---------- IGNORE BOTS FOR MODERATION ----------
+    # ---------- IGNORE BOTS ----------
     if message.author.bot:
-        await bot.process_commands(message)
         return
 
     # ---------- STAFF BYPASS ----------
     if message.author.guild_permissions.manage_messages:
-        await bot.process_commands(message)
         return
 
     # ---------- EMBED + LINK CONTROL ----------
@@ -119,15 +117,61 @@ async def on_message(message: discord.Message):
             except (discord.Forbidden, discord.HTTPException):
                 pass
 
-    # ---------- SAFETY ----------
-    if not message.author.joined_at:
-        await bot.process_commands(message)
-        return
+    # ---------- NEW USER WATCH (3 WEEKS) ----------
+    if message.author.joined_at:
+        joined_recently = (
+            discord.utils.utcnow() - message.author.joined_at
+        ).total_seconds() < NEW_USER_WATCH_SECONDS
 
+        content_lower = message.content.lower()
+
+        suspicious_keywords = [
+            "commission",
+            "commissions open",
+            "dm for art",
+            "art for sale",
+            "digital art",
+            "illustration services",
+            "graphic design services",
+            "crypto",
+            "bitcoin",
+            "ethereum",
+            "nft",
+            "nfts",
+            "blockchain",
+            "token sale",
+            "invest now",
+            "forex",
+            "trading signal"
+        ]
+
+        suspicious = any(keyword in content_lower for keyword in suspicious_keywords)
+
+        if joined_recently and suspicious:
+            log_channel = (
+                message.guild.get_channel(LOG_CHANNEL_ID)
+                if LOG_CHANNEL_ID
+                else discord.utils.get(message.guild.text_channels, name="logs")
+            )
+
+            if log_channel:
+                await log_channel.send(
+                    f"⚠️ **Suspicious promotional message from new user (<3 weeks)** {message.author.mention}\n"
+                    f"Channel: {message.channel.mention}\n"
+                    f"> {message.content}"
+                )
+
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+
+            return  # stop further processing
+
+    # ---------- SPAM DETECTION ----------
     now = message.created_at.timestamp()
     user_id = message.author.id
 
-    # ---------- SPAM DETECTION ----------
     recent_messages.setdefault(user_id, []).append(now)
     recent_messages[user_id] = [
         t for t in recent_messages[user_id]
@@ -147,61 +191,39 @@ async def on_message(message: discord.Message):
         await handle_spammer(message)
         recent_messages.pop(user_id, None)
 
-# ---------- NEW USER WATCH ----------
-joined_recently_10m = (
-    discord.utils.utcnow() - message.author.joined_at
-).total_seconds() < 1_814_400  # 3 weeks
 
-content_lower = message.content.lower()
+@bot.event
+async def on_message_edit(before, after):
+    if before.author.bot:
+        return
 
-suspicious_keywords = [
-    # Links
-    # "http", "www.",
+    if not before.guild:
+        return
 
-    # Art self-promo
-    "commission",
-    "commissions open",
-    "dm for art",
-    "art for sale",
-    "digital art",
-    "illustration services",
-    "graphic design services",
+    if before.content == after.content:
+        return
 
-    # Crypto
-    "crypto",
-    "bitcoin",
-    "ethereum",
-    "nft",
-    "nfts",
-    "blockchain",
-    "token sale",
-    "invest now",
-    "forex",
-    "trading signal"
-]
+    message_age_seconds = (
+        discord.utils.utcnow() - before.created_at
+    ).total_seconds()
 
-suspicious = any(keyword in content_lower for keyword in suspicious_keywords)
+    if message_age_seconds < OLD_EDIT_THRESHOLD:
+        return
 
-if joined_recently_10m and suspicious:
     log_channel = (
-        message.guild.get_channel(LOG_CHANNEL_ID)
+        before.guild.get_channel(LOG_CHANNEL_ID)
         if LOG_CHANNEL_ID
-        else discord.utils.get(message.guild.text_channels, name="logs")
+        else discord.utils.get(before.guild.text_channels, name="logs")
     )
 
     if log_channel:
         await log_channel.send(
-            f"⚠️ **Suspicious promotional message from new user** {message.author.mention}\n"
-            f"Channel: {message.channel.mention}\n"
-            f"> {message.content}"
+            f"✏️ **Old message edited (>7 days)**\n"
+            f"User: {before.author.mention}\n"
+            f"Channel: {before.channel.mention}\n\n"
+            f"**Before:**\n> {before.content}\n\n"
+            f"**After:**\n> {after.content}"
         )
-
-    try:
-        await message.delete()
-    except (discord.Forbidden, discord.HTTPException):
-        pass
-
-    await bot.process_commands(message)
 
 
 # ---------- SPAM HANDLER ----------
