@@ -161,7 +161,7 @@ async def on_message(message: discord.Message):
                         f"Channel: {message.channel.mention}\n"
                         f"> {message.content}"
                     )
-                except discord.Forbidden:
+                 except discord.Forbidden:
                     print("❌ Missing permission to send messages in log channel.")
 
             try:
