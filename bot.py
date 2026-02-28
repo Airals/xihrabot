@@ -147,34 +147,59 @@ async def on_message(message: discord.Message):
         await handle_spammer(message)
         recent_messages.pop(user_id, None)
 
-    # ---------- NEW USER WATCH ----------
-    joined_recently_10m = (
-        discord.utils.utcnow() - message.author.joined_at
-    ).total_seconds() < 600
+# ---------- NEW USER WATCH ----------
+joined_recently_10m = (
+    discord.utils.utcnow() - message.author.joined_at
+).total_seconds() < 1_814_400  # 3 weeks
 
-    suspicious = any(
-        word in message.content.lower()
-        for word in ("http", "commission")
+content_lower = message.content.lower()
+
+suspicious_keywords = [
+    # Links
+    # "http", "www.",
+
+    # Art self-promo
+    "commission",
+    "commissions open",
+    "dm for art",
+    "art for sale",
+    "digital art",
+    "illustration services",
+    "graphic design services",
+
+    # Crypto
+    "crypto",
+    "bitcoin",
+    "ethereum",
+    "nft",
+    "nfts",
+    "blockchain",
+    "token sale",
+    "invest now",
+    "forex",
+    "trading signal"
+]
+
+suspicious = any(keyword in content_lower for keyword in suspicious_keywords)
+
+if joined_recently_10m and suspicious:
+    log_channel = (
+        message.guild.get_channel(LOG_CHANNEL_ID)
+        if LOG_CHANNEL_ID
+        else discord.utils.get(message.guild.text_channels, name="logs")
     )
 
-    if joined_recently_10m and suspicious:
-        log_channel = (
-            message.guild.get_channel(LOG_CHANNEL_ID)
-            if LOG_CHANNEL_ID
-            else discord.utils.get(message.guild.text_channels, name="logs")
+    if log_channel:
+        await log_channel.send(
+            f"⚠️ **Suspicious promotional message from new user** {message.author.mention}\n"
+            f"Channel: {message.channel.mention}\n"
+            f"> {message.content}"
         )
 
-        if log_channel:
-            await log_channel.send(
-                f"⚠️ **Suspicious message from new user** {message.author.mention}\n"
-                f"Channel: {message.channel.mention}\n"
-                f"> {message.content}"
-            )
-
-        try:
-            await message.delete()
-        except (discord.Forbidden, discord.HTTPException):
-            pass
+    try:
+        await message.delete()
+    except (discord.Forbidden, discord.HTTPException):
+        pass
 
     await bot.process_commands(message)
 
