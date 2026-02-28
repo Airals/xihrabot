@@ -155,11 +155,14 @@ async def on_message(message: discord.Message):
             )
 
             if log_channel:
-                await log_channel.send(
-                    f"⚠️ **Suspicious promotional message from new user (<3 weeks)** {message.author.mention}\n"
-                    f"Channel: {message.channel.mention}\n"
-                    f"> {message.content}"
-                )
+                 try:
+                    await log_channel.send(
+                        f"⚠️ **Suspicious promotional message from new user (<3 weeks)** {message.author.mention}\n"
+                        f"Channel: {message.channel.mention}\n"
+                        f"> {message.content}"
+                    )
+                except discord.Forbidden:
+                    print("❌ Missing permission to send messages in log channel.")
 
             try:
                 await message.delete()
