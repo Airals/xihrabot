@@ -238,7 +238,8 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
             f"✏️ **Old message edited (>7 days)**\n"
             f"User: {message.author.mention}\n"
             f"Channel: {channel.mention}\n\n"
-            f"**Current Content:**\n> {message.content or '*No content*'}"
+            f"**Current Content:**\n> {message.content or '*No content*'}",
+            allowed_mentions=discord.AllowedMentions.none()
         )
 
 
