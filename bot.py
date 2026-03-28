@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from datetime import timedelta
+import datetime
 import os
 from dotenv import load_dotenv
 import re
@@ -19,6 +20,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))
 SOURCE_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("SOURCE_ANNOUNCEMENT_CHANNEL_ID", 0))
 TARGET_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("TARGET_ANNOUNCEMENT_CHANNEL_ID", 0))
+APRIL_FOOLS_CHANNEL_ID = int(os.getenv("APRIL_FOOLS_CHANNEL_ID", 0))
 
 RAW_BLACKLIST = os.getenv("ANNOUNCEMENT_BLACKLIST", "")
 ANNOUNCEMENT_BLACKLIST = {
@@ -47,6 +49,16 @@ def contains_blacklisted_keyword(content: str) -> bool:
             return True
     return False
 
+def clean_announcement_content(content: str) -> str:
+    # Remove role mentions (<@&123>)
+    content = re.sub(r"<@&\d+>", "@role", content)
+    # Remove user mentions (<@123> / <@!123>)
+    content = re.sub(r"<@!?\d+>", "@user", content)
+    # Prevent everyone/here
+    content = content.replace("@everyone", "@everyone (removed)")
+    content = content.replace("@here", "@here (removed)")
+    return content
+
 
 # ---------- EVENTS ----------
 @bot.event
@@ -60,13 +72,32 @@ async def on_message(message: discord.Message):
     if not message.guild:
         return
 
+    # --- 🐸 April Fools auto-react (07:00–12:00 UTC, April 1st only) ---
+    now = datetime.datetime.utcnow()
+
+    if (
+        now.month == 4
+        and now.day == 1
+        and 7 <= now.hour < 12
+        and message.channel.id == APRIL_FOOLS_CHANNEL_ID
+    ):
+        emoji = discord.utils.get(message.guild.emojis, name="YoshiWhat")
+
+        try:
+            if emoji:
+                await message.add_reaction(emoji)
+            else:
+                await message.add_reaction("🍆")
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
     # ---------- ANNOUNCEMENT RELAY ----------
     if (
         SOURCE_ANNOUNCEMENT_CHANNEL_ID
         and TARGET_ANNOUNCEMENT_CHANNEL_ID
         and message.channel.id == SOURCE_ANNOUNCEMENT_CHANNEL_ID
     ):
-        content = message.content or ""
+        content = clean_announcement_content(message.content or "")
 
         if ANNOUNCEMENT_BLACKLIST and contains_blacklisted_keyword(content):
             print("⛔ Announcement blocked due to blacklist keyword.")
@@ -117,7 +148,7 @@ async def on_message(message: discord.Message):
             except (discord.Forbidden, discord.HTTPException):
                 pass
 
-    # ---------- NEW USER WATCH (3 WEEKS) ----------
+    # ---------- NEW USER WATCH ----------
     if message.author.joined_at:
         joined_recently = (
             discord.utils.utcnow() - message.author.joined_at
@@ -126,23 +157,10 @@ async def on_message(message: discord.Message):
         content_lower = message.content.lower()
 
         suspicious_keywords = [
-            "commission",
-            "commissions open",
-            "dm for art",
-            "art for sale",
-            "digital art",
-            "illustration services",
-            "graphic design services",
-            "crypto",
-            "bitcoin",
-            "ethereum",
-            "nft",
-            "nfts",
-            "blockchain",
-            "token sale",
-            "invest now",
-            "forex",
-            "trading signal"
+            "commission", "commissions open", "dm for art", "art for sale",
+            "digital art", "illustration services", "graphic design services",
+            "crypto", "bitcoin", "ethereum", "nft", "nfts", "blockchain",
+            "token sale", "invest now", "forex", "trading signal"
         ]
 
         suspicious = any(keyword in content_lower for keyword in suspicious_keywords)
@@ -155,13 +173,14 @@ async def on_message(message: discord.Message):
             )
 
             if log_channel:
-                 try:
+                try:
                     await log_channel.send(
                         f"⚠️ **Suspicious promotional message from new user (<3 weeks)** {message.author.mention}\n"
                         f"Channel: {message.channel.mention}\n"
-                        f"> {message.content}"
+                        f"> {message.content}",
+                        allowed_mentions=discord.AllowedMentions.none()
                     )
-                 except discord.Forbidden:
+                except discord.Forbidden:
                     print("❌ Missing permission to send messages in log channel.")
 
             try:
@@ -172,13 +191,13 @@ async def on_message(message: discord.Message):
             return
 
     # ---------- SPAM DETECTION ----------
-    now = message.created_at.timestamp()
+    now_ts = message.created_at.timestamp()
     user_id = message.author.id
 
-    recent_messages.setdefault(user_id, []).append(now)
+    recent_messages.setdefault(user_id, []).append(now_ts)
     recent_messages[user_id] = [
         t for t in recent_messages[user_id]
-        if now - t <= SPAM_TIME_WINDOW
+        if now_ts - t <= SPAM_TIME_WINDOW
     ]
 
     joined_recently_1h = (
@@ -195,7 +214,7 @@ async def on_message(message: discord.Message):
         recent_messages.pop(user_id, None)
 
 
-# ---------- RELIABLE OLD EDIT DETECTION ----------
+# ---------- OLD EDIT DETECTION ----------
 @bot.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     if not payload.guild_id:
