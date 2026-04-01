@@ -78,7 +78,7 @@ async def on_message(message: discord.Message):
     if (
         now.month == 4
         and now.day == 1
-        and 7 <= now.hour < 12
+        and 6 <= now.hour < 11
         and message.channel.id == APRIL_FOOLS_CHANNEL_ID
     ):
         emoji = discord.utils.get(message.guild.emojis, name="YoshiWhat")
