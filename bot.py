@@ -45,7 +45,7 @@ MUTE_DURATION = timedelta(hours=24)
 
 NEW_USER_WATCH_SECONDS = 1_814_400  # 3 weeks
 OLD_EDIT_THRESHOLD = 604800  # 7 days
-
+ENABLE_OLD_EDIT_DETECTION = False
 
 
 # ---------- STATE ----------
@@ -294,6 +294,9 @@ async def on_message(message: discord.Message):
 # ---------- OLD EDIT DETECTION ----------
 @bot.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
+    if not ENABLE_OLD_EDIT_DETECTION:
+        return
+
     if not payload.guild_id:
         return
 
