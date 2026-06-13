@@ -76,12 +76,20 @@ def clean_announcement_content(content: str) -> str:
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     print(f"📣 Relaying from {SOURCE_ANNOUNCEMENT_CHANNEL_ID} → {TARGET_ANNOUNCEMENT_CHANNEL_ID}")
+    print(f"🍯 Honeypot channels: {HONEYPOT_CHANNEL_IDS}")
+    print(f"🛡️ Admin role: {ADMIN_ROLE_ID}")
 
 
 @bot.event
 async def on_message(message: discord.Message):
     if not message.guild:
         return
+    
+    if message.channel.id in HONEYPOT_CHANNEL_IDS:
+    print(
+        f"🍯 Honeypot hit by {message.author} "
+        f"in {message.channel.name} ({message.channel.id})"
+    )
     
     if message.author.bot:
         return
