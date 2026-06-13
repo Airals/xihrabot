@@ -46,6 +46,7 @@ MUTE_DURATION = timedelta(hours=24)
 NEW_USER_WATCH_SECONDS = 1_814_400  # 3 weeks
 OLD_EDIT_THRESHOLD = 604800  # 7 days
 ENABLE_OLD_EDIT_DETECTION = False
+HONEYPOT_GRACE_SECONDS = 60 * 60 * 24 * 90  # 90 days
 
 
 # ---------- STATE ----------
@@ -86,10 +87,10 @@ async def on_message(message: discord.Message):
         return
     
     if message.channel.id in HONEYPOT_CHANNEL_IDS:
-    print(
-        f"🍯 Honeypot hit by {message.author} "
-        f"in {message.channel.name} ({message.channel.id})"
-    )
+        print(
+            f"🍯 Honeypot hit by {message.author} "
+            f"in {message.channel.name} ({message.channel.id})"
+        )
     
     if message.author.bot:
         return
@@ -146,10 +147,6 @@ async def on_message(message: discord.Message):
 
                 except discord.HTTPException as e:
                     print(f"❌ Failed to relay announcement: {e}")
-
-    # ---------- IGNORE BOTS ----------
-    if message.author.bot:
-        return
     
         # ---------- HONEYPOT CHANNELS ----------
     if message.channel.id in HONEYPOT_CHANNEL_IDS:
