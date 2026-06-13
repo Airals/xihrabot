@@ -29,6 +29,15 @@ ANNOUNCEMENT_BLACKLIST = {
     if word.strip()
 }
 
+RAW_HONEYPOT_CHANNEL_IDS = os.getenv("HONEYPOT_CHANNEL_IDS", "")
+HONEYPOT_CHANNEL_IDS = {
+    int(channel_id.strip())
+    for channel_id in RAW_HONEYPOT_CHANNEL_IDS.split(",")
+    if channel_id.strip().isdigit()
+}
+
+ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", 0))
+
 # ---------- CONFIG ----------
 SPAM_MESSAGE_THRESHOLD = 5
 SPAM_TIME_WINDOW = 5
@@ -36,6 +45,8 @@ MUTE_DURATION = timedelta(hours=24)
 
 NEW_USER_WATCH_SECONDS = 1_814_400  # 3 weeks
 OLD_EDIT_THRESHOLD = 604800  # 7 days
+
+
 
 # ---------- STATE ----------
 recent_messages: dict[int, list[float]] = {}
@@ -70,6 +81,9 @@ async def on_ready():
 @bot.event
 async def on_message(message: discord.Message):
     if not message.guild:
+        return
+    
+    if message.author.bot:
         return
 
     # --- 🐸 April Fools auto-react (07:00–12:00 UTC, April 1st only) ---
@@ -127,6 +141,69 @@ async def on_message(message: discord.Message):
 
     # ---------- IGNORE BOTS ----------
     if message.author.bot:
+        return
+    
+        # ---------- HONEYPOT CHANNELS ----------
+    if message.channel.id in HONEYPOT_CHANNEL_IDS:
+        member = message.author
+
+        joined_recently = True
+
+        if member.joined_at:
+            joined_recently = (
+                discord.utils.utcnow() - member.joined_at
+            ).total_seconds() < HONEYPOT_GRACE_SECONDS
+
+        log_channel = (
+            message.guild.get_channel(LOG_CHANNEL_ID)
+            if LOG_CHANNEL_ID
+            else discord.utils.get(message.guild.text_channels, name="logs")
+        )
+
+        if joined_recently:
+            try:
+                await member.ban(
+                    reason=f"Honeypot channel triggered: #{message.channel.name}",
+                    delete_message_days=1
+                )
+
+                if log_channel:
+                    await log_channel.send(
+                        f"🚨 **User banned for triggering honeypot**\n"
+                        f"User: {member} / {member.mention}\n"
+                        f"Channel: {message.channel.mention}\n"
+                        f"Joined: {member.joined_at}\n\n"
+                        f"**Message:**\n> {message.content or '*No content*'}",
+                        allowed_mentions=discord.AllowedMentions.none()
+                    )
+
+            except discord.Forbidden:
+                if log_channel:
+                    await log_channel.send(
+                        f"❌ Tried to ban {member.mention} for honeypot trigger, but I lack permission.",
+                        allowed_mentions=discord.AllowedMentions.none()
+                    )
+            except discord.HTTPException as e:
+                print(f"❌ Failed to ban honeypot user: {e}")
+
+            return
+
+        # Older account / long-time server member: warn admins instead
+        if log_channel:
+            admin_ping = f"<@&{ADMIN_ROLE_ID}> " if ADMIN_ROLE_ID else ""
+
+            try:
+                await log_channel.send(
+                    f"{admin_ping}⚠️ **Long-term member posted in honeypot channel**\n"
+                    f"User: {member.mention} / {member}\n"
+                    f"Channel: {message.channel.mention}\n"
+                    f"Joined: {member.joined_at}\n\n"
+                    f"**Message:**\n> {message.content or '*No content*'}",
+                    allowed_mentions=discord.AllowedMentions(roles=True)
+                )
+            except discord.Forbidden:
+                print("❌ Missing permission to send honeypot warning.")
+
         return
 
     # ---------- STAFF BYPASS ----------
