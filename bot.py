@@ -91,6 +91,8 @@ async def on_message(message: discord.Message):
             f"🍯 Honeypot hit by {message.author} "
             f"in {message.channel.name} ({message.channel.id})"
         )
+        print(f"Joined at: {message.author.joined_at}")
+    
     
     if message.author.bot:
         return
@@ -165,11 +167,14 @@ async def on_message(message: discord.Message):
             else discord.utils.get(message.guild.text_channels, name="logs")
         )
 
+        print(f"Log channel found: {log_channel}")
+        print(f"Joined recently: {joined_recently}")
+
         if joined_recently:
             try:
                 await member.ban(
                     reason=f"Honeypot channel triggered: #{message.channel.name}",
-                    delete_message_days=1
+                    delete_message_seconds=86400
                 )
 
                 if log_channel:
