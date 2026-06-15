@@ -129,26 +129,40 @@ async def on_message(message: discord.Message):
         else:
             target_channel = bot.get_channel(TARGET_ANNOUNCEMENT_CHANNEL_ID)
 
-            if target_channel:
+            if message.channel.id == SOURCE_ANNOUNCEMENT_CHANNEL_ID:
+                print(f"📣 Source channel message seen from {message.author}: {message.content[:80]}")
+
+            if target_channel is None:
                 try:
-                    files = [await a.to_file() for a in message.attachments]
-
-                    sent_message = await target_channel.send(
-                        content=content if content else None,
-                        files=files,
-                        allowed_mentions=discord.AllowedMentions.none()
-                    )
-
-                    if isinstance(target_channel, discord.TextChannel) and target_channel.is_news():
-                        try:
-                            await sent_message.publish()
-                        except discord.Forbidden:
-                            print("❌ Missing permission to publish announcement.")
-
-                    print("📣 Announcement relayed")
-
+                    target_channel = await bot.fetch_channel(TARGET_ANNOUNCEMENT_CHANNEL_ID)
+                    print("📣 Target channel fetched instead of cached")
+                except discord.Forbidden:
+                    print("❌ Missing permission to access target announcement channel.")
+                    return
                 except discord.HTTPException as e:
-                    print(f"❌ Failed to relay announcement: {e}")
+                    print(f"❌ Failed to fetch target announcement channel: {e}")
+                    return
+
+            try:
+                files = [await a.to_file() for a in message.attachments]
+
+                sent_message = await target_channel.send(
+                    content=content if content else None,
+                    files=files,
+                    allowed_mentions=discord.AllowedMentions.none()
+                )
+
+                if isinstance(target_channel, discord.TextChannel) and target_channel.is_news():
+                    try:
+                        await sent_message.publish()
+                    except discord.Forbidden:
+                        print("❌ Missing permission to publish announcement.")
+
+                print("📣 Announcement relayed")
+
+            except discord.HTTPException as e:
+                print(f"❌ Failed to relay announcement: {e}")
+        return
     
         # ---------- HONEYPOT CHANNELS ----------
     if message.channel.id in HONEYPOT_CHANNEL_IDS:
