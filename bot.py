@@ -85,6 +85,11 @@ async def on_ready():
 async def on_message(message: discord.Message):
     if not message.guild:
         return
+
+    # ---------- BOT COMMANDS ----------
+    if message.content.startswith(bot.command_prefix):
+        await bot.process_commands(message)
+        return
     
     if message.channel.id in HONEYPOT_CHANNEL_IDS:
         print(
@@ -386,6 +391,133 @@ async def handle_spammer(message: discord.Message):
     except discord.Forbidden:
         print("❌ Missing permission to timeout members.")
 
+
+
+# ---------- RE-EMBED COMMAND ----------
+@bot.command(name="reembed")
+@commands.has_permissions(manage_messages=True)
+async def reembed(ctx: commands.Context, message_link: str | None = None):
+    """
+    Re-enable embeds on a Discord message.
+
+    Usage:
+    !reembed https://discord.com/channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID
+    """
+
+    if not message_link:
+        await ctx.reply(
+            "❌ Please provide a Discord message link.\n"
+            "`!reembed https://discord.com/channels/SERVER/CHANNEL/MESSAGE`",
+            mention_author=False
+        )
+        return
+
+    match = re.match(
+        r"https?://(?:www\.)?(?:discord\.com|discordapp\.com)/channels/"
+        r"(\d+)/(\d+)/(\d+)",
+        message_link
+    )
+
+    if not match:
+        await ctx.reply(
+            "❌ That doesn't look like a valid Discord message link.",
+            mention_author=False
+        )
+        return
+
+    guild_id = int(match.group(1))
+    channel_id = int(match.group(2))
+    message_id = int(match.group(3))
+
+    # Don't allow cross-server use
+    if not ctx.guild or ctx.guild.id != guild_id:
+        await ctx.reply(
+            "❌ That message isn't from this server.",
+            mention_author=False
+        )
+        return
+
+    # Get the channel/thread
+    channel = bot.get_channel(channel_id)
+
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(channel_id)
+        except discord.NotFound:
+            await ctx.reply(
+                "❌ I couldn't find that channel or thread.",
+                mention_author=False
+            )
+            return
+        except discord.Forbidden:
+            await ctx.reply(
+                "❌ I don't have permission to access that channel or thread.",
+                mention_author=False
+            )
+            return
+        except discord.HTTPException as e:
+            await ctx.reply(
+                f"❌ Failed to fetch the channel: `{e}`",
+                mention_author=False
+            )
+            return
+
+    # Fetch the target message
+    try:
+        target_message = await channel.fetch_message(message_id)
+    except discord.NotFound:
+        await ctx.reply(
+            "❌ I couldn't find that message.",
+            mention_author=False
+        )
+        return
+    except discord.Forbidden:
+        await ctx.reply(
+            "❌ I don't have permission to read that message.",
+            mention_author=False
+        )
+        return
+    except discord.HTTPException as e:
+        await ctx.reply(
+            f"❌ Failed to fetch the message: `{e}`",
+            mention_author=False
+        )
+        return
+
+    # Restore suppressed embeds
+    try:
+        await target_message.edit(suppress=False)
+
+        await ctx.reply(
+            f"✅ Re-enabled embeds on {target_message.jump_url}",
+            mention_author=False,
+            delete_after=10
+        )
+
+    except discord.Forbidden:
+        await ctx.reply(
+            "❌ I don't have permission to change the embed state on that message. "
+            "Make sure the bot has **Manage Messages** in that channel/thread.",
+            mention_author=False
+        )
+
+    except discord.HTTPException as e:
+        await ctx.reply(
+            f"❌ Discord rejected the re-embed request: `{e}`",
+            mention_author=False
+        )
+
+
+@reembed.error
+async def reembed_error(ctx: commands.Context, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.reply(
+            "❌ You need **Manage Messages** to use `!reembed`.",
+            mention_author=False
+        )
+        return
+
+    raise error
 
 # ---------- RUN ----------
 bot.run(TOKEN)
