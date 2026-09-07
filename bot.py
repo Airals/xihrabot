@@ -5,6 +5,9 @@ import datetime
 import os
 from dotenv import load_dotenv
 import re
+import json
+import gspread
+from google.oauth2.service_account import Credentials
 
 # ---------- INTENTS ----------
 intents = discord.Intents.default()
@@ -21,6 +24,7 @@ LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))
 SOURCE_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("SOURCE_ANNOUNCEMENT_CHANNEL_ID", 0))
 TARGET_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("TARGET_ANNOUNCEMENT_CHANNEL_ID", 0))
 APRIL_FOOLS_CHANNEL_ID = int(os.getenv("APRIL_FOOLS_CHANNEL_ID", 0))
+BAN_CHECK_CHANNEL_ID = int(os.getenv("BAN_CHECK_CHANNEL_ID", 1546533466596712488))
 
 RAW_BLACKLIST = os.getenv("ANNOUNCEMENT_BLACKLIST", "")
 ANNOUNCEMENT_BLACKLIST = {
@@ -37,6 +41,40 @@ HONEYPOT_CHANNEL_IDS = {
 }
 
 ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", 0))
+
+# ---------- GOOGLE SHEETS ----------
+GOOGLE_SHEET_NAME = "RPC Sheet of Doom"
+GOOGLE_WORKSHEET_NAME = "Ark1"
+
+GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
+    "https://www.googleapis.com/auth/drive.readonly",
+]
+
+google_sheet = None
+
+try:
+    google_service_account = os.getenv("GOOGLE_SERVICE_ACCOUNT", "")
+
+    if google_service_account:
+        google_credentials = json.loads(google_service_account)
+
+        google_auth = Credentials.from_service_account_info(
+            google_credentials,
+            scopes=GOOGLE_SCOPES
+        )
+
+        google_client = gspread.authorize(google_auth)
+        google_sheet = google_client.open(
+            GOOGLE_SHEET_NAME
+        ).worksheet(GOOGLE_WORKSHEET_NAME)
+
+        print("✅ Connected to RPC Sheet of Doom / Ark1")
+    else:
+        print("⚠️ GOOGLE_SERVICE_ACCOUNT is not configured. !bancheck will be unavailable.")
+
+except Exception as e:
+    print(f"❌ Failed to connect to Google Sheet: {e}")
 
 # ---------- CONFIG ----------
 SPAM_MESSAGE_THRESHOLD = 5
@@ -391,6 +429,163 @@ async def handle_spammer(message: discord.Message):
     except discord.Forbidden:
         print("❌ Missing permission to timeout members.")
 
+
+
+# ---------- BAN CHECK COMMAND ----------
+@bot.command(name="bancheck")
+@commands.has_permissions(manage_messages=True)
+async def bancheck(ctx: commands.Context, *, member_name: str | None = None):
+    """
+    Search the RPC moderation sheet for a member.
+
+    Usage:
+    !bancheck Discord Name
+    """
+
+    # Only allow the command in the designated moderation channel
+    if ctx.channel.id != BAN_CHECK_CHANNEL_ID:
+        return
+
+    if not member_name:
+        await ctx.reply(
+            "❌ Please provide a member name.\n"
+            "`!bancheck <Discord name>`",
+            mention_author=False
+        )
+        return
+
+    if google_sheet is None:
+        await ctx.reply(
+            "❌ The moderation sheet connection is not configured.",
+            mention_author=False
+        )
+        return
+
+    try:
+        records = google_sheet.get_all_records()
+        search_name = member_name.strip().casefold()
+
+        # Exact matches first
+        exact_matches = [
+            row for row in records
+            if str(row.get("RPC Member Name", "")).strip().casefold() == search_name
+        ]
+
+        # Fall back to partial matches
+        matches = exact_matches or [
+            row for row in records
+            if search_name in str(row.get("RPC Member Name", "")).strip().casefold()
+        ]
+
+        if not matches:
+            await ctx.reply(
+                f"✅ No moderation records found for **{member_name}**.",
+                mention_author=False
+            )
+            return
+
+        # Avoid flooding the channel if a very broad search is used
+        if len(matches) > 10:
+            names = [
+                str(row.get("RPC Member Name", "")).strip()
+                for row in matches[:10]
+            ]
+
+            await ctx.reply(
+                f"⚠️ **{len(matches)} matches** found for `{member_name}`.\n"
+                "Please use a more specific name.\n\n"
+                + "\n".join(f"• {name}" for name in names if name),
+                mention_author=False
+            )
+            return
+
+        for record in matches:
+            display_name = str(
+                record.get("RPC Member Name", member_name)
+            ).strip() or member_name
+
+            embed = discord.Embed(
+                title=f"Moderation Record: {display_name}",
+                colour=discord.Colour.red()
+            )
+
+            embed.add_field(
+                name="No. of reminders",
+                value=str(record.get("No. of reminders", "") or "None"),
+                inline=True
+            )
+
+            embed.add_field(
+                name="Warnings / bans received",
+                value=str(
+                    record.get("No. of warnings/bans received", "") or "None"
+                ),
+                inline=True
+            )
+
+            embed.add_field(
+                name="Reminder / warning / ban notes",
+                value=str(
+                    record.get("Reminder/warning/ban Notes", "") or "None"
+                )[:1024],
+                inline=False
+            )
+
+            embed.add_field(
+                name="General notes",
+                value=str(
+                    record.get("General notes", "") or "None"
+                )[:1024],
+                inline=False
+            )
+
+            embed.add_field(
+                name="Complaints from other members",
+                value=str(
+                    record.get("Complaints from other members", "") or "None"
+                )[:1024],
+                inline=False
+            )
+
+            embed.set_footer(
+                text=f"Requested by {ctx.author}"
+            )
+
+            await ctx.reply(
+                embed=embed,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none()
+            )
+
+    except gspread.exceptions.GSpreadException as e:
+        print(f"❌ Google Sheets ban check error: {e}")
+        await ctx.reply(
+            "❌ There was an error reading the moderation sheet.",
+            mention_author=False
+        )
+
+    except Exception as e:
+        print(f"❌ Ban check error: {e}")
+        await ctx.reply(
+            "❌ There was an unexpected error checking the moderation sheet.",
+            mention_author=False
+        )
+
+
+@bancheck.error
+async def bancheck_error(ctx: commands.Context, error):
+    # Don't reveal the command outside the permitted channel
+    if ctx.channel.id != BAN_CHECK_CHANNEL_ID:
+        return
+
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.reply(
+            "❌ You need **Manage Messages** to use `!bancheck`.",
+            mention_author=False
+        )
+        return
+
+    raise error
 
 
 # ---------- RE-EMBED COMMAND ----------
