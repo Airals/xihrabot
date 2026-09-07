@@ -462,16 +462,36 @@ async def bancheck(ctx: commands.Context, *, member_name: str | None = None):
         return
 
     try:
-        records = google_sheet.get_all_records(
-            expected_headers=[
-                "RPC Member Name",
-                "No. of reminders",
-                "No. of warnings/bans received",
-                "Reminder/warning/ban Notes",
-                "General notes",
-                "Complaints from other members",
-            ]
-        )
+        all_values = google_sheet.get_all_values()
+
+        header_row_index = None
+
+        for i, row in enumerate(all_values):
+            if "RPC Member Name" in row:
+                header_row_index = i
+                break
+
+        if header_row_index is None:
+            raise ValueError("Could not find 'RPC Member Name' header in Ark1")
+
+        headers = all_values[header_row_index]
+
+        records = []
+
+        for row in all_values[header_row_index + 1:]:
+            if not any(cell.strip() for cell in row):
+                continue
+
+            # Pad short rows so they line up with the headers
+            row = row + [""] * (len(headers) - len(row))
+
+            record = {
+                header.strip(): value
+                for header, value in zip(headers, row)
+                if header.strip()
+            }
+
+            records.append(record)
         search_name = member_name.strip().casefold()
 
         # Exact matches first
