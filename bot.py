@@ -462,7 +462,16 @@ async def bancheck(ctx: commands.Context, *, member_name: str | None = None):
         return
 
     try:
-        records = google_sheet.get_all_records()
+        records = google_sheet.get_all_records(
+            expected_headers=[
+                "RPC Member Name",
+                "No. of reminders",
+                "No. of warnings/bans received",
+                "Reminder/warning/ban Notes",
+                "General notes",
+                "Complaints from other members",
+            ]
+        )
         search_name = member_name.strip().casefold()
 
         # Exact matches first
